@@ -453,7 +453,7 @@ fn test_tpcgen_cli_tpch_parquet_no_overwrite() {
 
     let original_metadata =
         fs::metadata(&expected_file).expect("Failed to get metadata of generated file");
-    assert_eq!(original_metadata.len(), 13483);
+    assert_eq!(original_metadata.len(), 12544);
 
     // Run the tpcgen-cli command again with the same parameters and expect the
     // file to not be overwritten and a warning to be logged
@@ -838,49 +838,49 @@ async fn test_write_parquet_row_group_size_default() {
         vec![
             RowGroups {
                 table: "customer",
-                row_group_bytes: vec![6187565, 6171812, 6172508, 6179936],
+                row_group_bytes: vec![6143979, 6128186, 6128990, 6136376],
             },
             RowGroups {
                 table: "lineitem",
                 row_group_bytes: vec![
-                    7864896, 7812664, 7789661, 7828503, 7851751, 7821381, 7847125, 7800929,
-                    7809775, 7813567, 7812578, 7846593, 7809238, 7801440, 7850549, 7819458,
-                    7851472, 7816279, 7807613, 7791310, 7807505, 7859553, 7802683, 7811935,
-                    7853865, 7800893, 7810312, 7828929, 7819736, 7868934, 7830704, 7840285,
-                    7820804, 7818718, 7824176, 7799165, 7832052, 7835348, 7815772, 7810940,
-                    7834011, 7844067, 7805796, 7837325, 7802115, 7800328, 7846713, 7812322,
-                    7791331, 7792360, 7867330, 7868489, 7843672,
+                    8021145, 7963623, 7940267, 7979000, 8008268, 7977410, 8002237, 7951600,
+                    7964356, 7964563, 7963443, 8001881, 7960127, 7951557, 8001430, 7970413,
+                    8007490, 7972202, 7963947, 7946801, 7962902, 8015487, 7957652, 7962690,
+                    8009950, 7956479, 7965014, 7984747, 7975073, 8024988, 7980696, 7996412,
+                    7971595, 7968711, 7976537, 7949691, 7987706, 7985743, 7971565, 7962117,
+                    7984810, 8005764, 7956241, 7992747, 7952558, 7955872, 8002104, 7963089,
+                    7942196, 7948307, 8022846, 8023571, 7994513,
                 ],
             },
             RowGroups {
                 table: "nation",
-                row_group_bytes: vec![2684],
+                row_group_bytes: vec![2576],
             },
             RowGroups {
                 table: "orders",
                 row_group_bytes: vec![
-                    7563642, 7565106, 7570133, 7564382, 7568529, 7569167, 7560396, 7561616,
-                    7562681, 7558866, 7562805, 7557644, 7566743, 7556889, 7562037, 7558223,
+                    9167080, 9166044, 9170994, 9168130, 9172351, 9170329, 9161377, 9165431,
+                    9163797, 9159534, 9163543, 9161530, 9167513, 9157833, 9162983, 9162131,
                 ],
             },
             RowGroups {
                 table: "part",
-                row_group_bytes: vec![6998814, 6998368],
+                row_group_bytes: vec![7383213, 7383192],
             },
             RowGroups {
                 table: "partsupp",
                 row_group_bytes: vec![
-                    7597259, 7579194, 7594606, 7590317, 7588138, 7593664, 7584621, 7603635,
-                    7587856, 7594038, 7590047, 7600584, 7596523, 7598563, 7593668, 7582311,
+                    7713855, 7695236, 7710792, 7706695, 7704492, 7709940, 7700959, 7720045,
+                    7704114, 7710124, 7706483, 7717026, 7712743, 7714957, 7710215, 7698579,
                 ],
             },
             RowGroups {
                 table: "region",
-                row_group_bytes: vec![554],
+                row_group_bytes: vec![497],
             },
             RowGroups {
                 table: "supplier",
-                row_group_bytes: vec![1575864],
+                row_group_bytes: vec![1532112],
             },
         ],
     );
@@ -907,39 +907,39 @@ async fn test_write_parquet_row_group_size_20mb() {
         vec![
             RowGroups {
                 table: "customer",
-                row_group_bytes: vec![12315446, 12308579],
+                row_group_bytes: vec![12271860, 12265061],
             },
             RowGroups {
                 table: "lineitem",
                 row_group_bytes: vec![
-                    20921739, 20989140, 20922454, 20902116, 20909161, 20968258, 20956068, 20885105,
-                    20911667, 20956009, 20938080, 21010407, 20909466, 20912893, 20940071, 20939706,
-                    20926766, 20922256, 20907081, 20999494,
+                    21077988, 21144133, 21073149, 21052040, 21060087, 21118644, 21106642, 21040001,
+                    21067463, 21112132, 21093109, 21165773, 21060083, 21063424, 21095435, 21089930,
+                    21082678, 21077693, 21062948, 21149887,
                 ],
             },
             RowGroups {
                 table: "nation",
-                row_group_bytes: vec![2684],
+                row_group_bytes: vec![2576],
             },
             RowGroups {
                 table: "orders",
-                row_group_bytes: vec![20055048, 20060248, 20052364, 20046673, 20040912, 20036597],
+                row_group_bytes: vec![24431670, 24434556, 24426392, 24420973, 24417857, 24410911],
             },
             RowGroups {
                 table: "part",
-                row_group_bytes: vec![14377186],
+                row_group_bytes: vec![14761587],
             },
             RowGroups {
                 table: "partsupp",
-                row_group_bytes: vec![20367654, 20381847, 20364403, 20368125, 20385856, 20373106],
+                row_group_bytes: vec![20484227, 20498292, 20480742, 20484426, 20502429, 20489713],
             },
             RowGroups {
                 table: "region",
-                row_group_bytes: vec![554],
+                row_group_bytes: vec![497],
             },
             RowGroups {
                 table: "supplier",
-                row_group_bytes: vec![1575864],
+                row_group_bytes: vec![1532112],
             },
         ],
     );

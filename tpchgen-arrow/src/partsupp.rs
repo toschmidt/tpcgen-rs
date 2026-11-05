@@ -79,8 +79,10 @@ impl Iterator for PartSuppArrow {
     type Item = Result<RecordBatch, ArrowError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Get next rows to convert
-        let rows: Vec<_> = self.inner.by_ref().take(self.batch_size).collect();
+        // Get next rows to convert. The generator gives no size hint, so reserve
+        // the batch up front instead of growing (and copying) the vector
+        let mut rows = Vec::with_capacity(self.batch_size);
+        rows.extend(self.inner.by_ref().take(self.batch_size));
         if rows.is_empty() {
             return None;
         }

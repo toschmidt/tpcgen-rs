@@ -7,6 +7,11 @@ use tpcgen_cli::tpch_cli::Cli as TpchCli;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+// The system allocator copies the growing buffers of the Parquet writer more
+// often, and with many threads contends on the kernel's memory map lock.
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 #[derive(Parser)]
 #[command(name = "tpcgen-cli")]
 #[command(version)]

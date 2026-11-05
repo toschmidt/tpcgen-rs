@@ -17,10 +17,16 @@ use std::io::{BufWriter, Write};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::OwnedSemaphorePermit;
 
 use crate::output_location::WriteOutput;
 use crate::progress::ProgressHandle;
 use crate::statistics::WriteStatistics;
+use crate::worker_queue::Permits;
+
+/// The column chunks of one row group, and the chunk permit (see
+/// [`Permits::chunk`]) to release once they are written
+type EncodedRowGroup = (Vec<ArrowColumnChunk>, Option<OwnedSemaphorePermit>);
 
 /// Maximum size of a column chunk's dictionary page before the writer falls
 /// back to the column's non-dictionary encoding.
@@ -74,7 +80,7 @@ pub(crate) fn parse_column_encoding_pair(s: &str) -> Result<(String, Encoding), 
 pub(crate) fn reject_unsupported_encoding(encoding: Encoding) -> io::Result<()> {
     match encoding {
         Encoding::PLAIN_DICTIONARY | Encoding::RLE_DICTIONARY => Err(io::Error::other(format!(
-            "encoding {encoding} cannot be set with --column-encoding; dictionary encoding is the writer default. Use a non-dictionary encoding such as PLAIN or DELTA_LENGTH_BYTE_ARRAY"
+            "encoding {encoding} cannot be set with --column-encoding; dictionary encoding is chosen per column by the generator. Use a non-dictionary encoding such as PLAIN or DELTA_LENGTH_BYTE_ARRAY"
         ))),
         #[allow(deprecated)]
         Encoding::BIT_PACKED => Err(io::Error::other(
@@ -157,15 +163,18 @@ fn apply_column_encodings(
 
 /// Converts a set of RecordBatchReaders into a Parquet file.
 ///
-/// Uses num_threads to generate the data in parallel.
+/// Uses num_threads to generate the data in parallel. Only the columns named
+/// in `dictionary_columns` are dictionary encoded.
 ///
 /// Note the input is an iterator of [`RecordBatchReader`]s; the batches
 /// produced by each iterator are encoded as their own row group.
+#[allow(clippy::too_many_arguments)]
 pub async fn generate_parquet<W, I>(
     writer: W,
     iter_iter: I,
     num_threads: usize,
     parquet_compression: Compression,
+    dictionary_columns: &[&str],
     column_encodings: Option<&[(String, Encoding)]>,
     field_ids: bool,
     progress: ProgressHandle,
@@ -200,9 +209,18 @@ where
             .map_err(io::Error::other)?,
     );
 
+    // A dictionary only pays for columns with few distinct values. For the
+    // others it makes the file bigger and costs encoding time (and memory
+    // bandwidth), so it is off unless the table lists the column.
     let mut builder = WriterProperties::builder()
         .set_compression(parquet_compression)
-        .set_dictionary_page_size_limit(DICTIONARY_PAGE_SIZE_LIMIT);
+        .set_dictionary_page_size_limit(DICTIONARY_PAGE_SIZE_LIMIT)
+        .set_dictionary_enabled(false);
+    for descr in parquet_schema.columns() {
+        if dictionary_columns.contains(&descr.name()) {
+            builder = builder.set_column_dictionary_enabled(descr.path().clone(), true);
+        }
+    }
     if let Some(encodings) = column_encodings {
         builder = apply_column_encodings(builder, &parquet_schema, encodings)?;
     }
@@ -231,12 +249,17 @@ where
         .map(async |(row_group_index, iter)| {
             let row_group_factory = Arc::clone(&row_group_factory);
             let schema = Arc::clone(&schema);
-            // run on a separate thread
-            tokio::task::spawn(async move {
+            let permits = Permits::current();
+            let chunk = Permits::chunk(&permits).await;
+            // run on a separate thread, once one is free
+            let column_chunks = tokio::task::spawn(async move {
+                let _thread = Permits::thread(&permits).await;
                 encode_row_group(row_group_factory, row_group_index, schema, iter)
             })
             .await
-            .map_err(|e| io::Error::other(format!("Inner task panicked: {e}")))?
+            .map_err(|e| io::Error::other(format!("Inner task panicked: {e}")))??;
+            // the writer releases the chunk permit once it wrote the row group
+            Ok((column_chunks, chunk)) as io::Result<_>
         })
         .buffered(num_threads); // generate row groups in parallel
 
@@ -245,16 +268,14 @@ where
     // A blocking task that writes the row groups to the file
     // done in a blocking task to avoid having a thread waiting on IO
     // Now, read each completed row group and write it to the file
-    let (tx, mut rx): (
-        Sender<Vec<ArrowColumnChunk>>,
-        Receiver<Vec<ArrowColumnChunk>>,
-    ) = tokio::sync::mpsc::channel(num_threads);
+    let (tx, mut rx): (Sender<EncodedRowGroup>, Receiver<EncodedRowGroup>) =
+        tokio::sync::mpsc::channel(num_threads);
     let writer_task = tokio::task::spawn_blocking(move || {
         // Report the magic bytes written by `new` before any data; this starts the throughput timer.
         let mut bytes_reported = writer.bytes_written();
         progress.increment(0, bytes_reported as u64);
 
-        while let Some(column_chunks) = rx.blocking_recv() {
+        while let Some((column_chunks, _chunk)) = rx.blocking_recv() {
             // Start row group
             let mut row_group_writer = writer.next_row_group().map_err(io::Error::other)?;
 
@@ -304,6 +325,8 @@ pub(crate) struct ParquetOutput<'a, I> {
     pub(crate) num_threads: usize,
     /// Compression for every column
     pub(crate) compression: Compression,
+    /// Columns to dictionary encode, see [`generate_parquet`]
+    pub(crate) dictionary_columns: &'static [&'static str],
     /// Per-column encodings (`--column-encoding`)
     pub(crate) column_encodings: Option<&'a [(String, Encoding)]>,
     /// Write sequential Parquet field IDs (`--field-ids`)
@@ -325,6 +348,7 @@ where
             self.sources,
             self.num_threads,
             self.compression,
+            self.dictionary_columns,
             self.column_encodings,
             self.field_ids,
             self.progress,
@@ -476,6 +500,7 @@ mod tests {
             vec![region_source()].into_iter(),
             1,
             Compression::UNCOMPRESSED,
+            &[],
             None,
             true,
             ProgressHandle::new(|_, _| {}),
@@ -501,6 +526,7 @@ mod tests {
             vec![region_source(), region_source()].into_iter(),
             1,
             Compression::UNCOMPRESSED,
+            &[],
             None,
             true,
             progress,
@@ -525,6 +551,7 @@ mod tests {
             vec![region_source()].into_iter(),
             1,
             Compression::UNCOMPRESSED,
+            &[],
             encodings,
             true,
             progress,

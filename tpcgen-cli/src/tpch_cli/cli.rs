@@ -284,8 +284,10 @@ struct ParquetArgs {
     /// type (e.g. RLE only applies to boolean columns).
     ///
     /// PLAIN_DICTIONARY, RLE_DICTIONARY, and BIT_PACKED are rejected:
-    /// dictionary encoding is the writer default and cannot be requested
-    /// through this flag, and BIT_PACKED is not supported for writing.
+    /// the generator dictionary encodes only the columns with few distinct
+    /// values, which cannot be changed through this flag, and BIT_PACKED is
+    /// not supported for writing. A column named here is never dictionary
+    /// encoded.
     #[arg(
         long,
         value_name = "COLUMN=ENCODING",

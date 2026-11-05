@@ -126,9 +126,8 @@ where
         let chunk_count = planned.plan.chunk_count();
         let generate = Arc::clone(&generate);
         queue
-            .schedule(chunk_count, move |num_threads| async move {
-                generate(planned, num_threads).await?;
-                Ok(num_threads)
+            .schedule(chunk_count, move |num_threads| {
+                generate(planned, num_threads)
             })
             .await?;
     }

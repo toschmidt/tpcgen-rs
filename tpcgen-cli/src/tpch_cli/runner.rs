@@ -111,7 +111,7 @@ async fn run_plan(
     plan: OutputPlan,
     num_threads: usize,
     progress: ProgressHandle,
-) -> io::Result<usize> {
+) -> io::Result<()> {
     match plan.table() {
         Table::Nation => run_nation_plan(plan, num_threads, progress).await,
         Table::Region => run_region_plan(plan, num_threads, progress).await,
@@ -155,6 +155,29 @@ where
     Ok(())
 }
 
+/// The columns that are dictionary encoded in Parquet: those where a
+/// dictionary made the column smaller at scale factor 100 (zstd level 3).
+/// Columns where almost every value is distinct (keys, prices, comments) are
+/// smaller and faster to write without one.
+#[rustfmt::skip]
+const DICTIONARY_COLUMNS: &[&str] = &[
+    // customer
+    "c_nationkey", "c_mktsegment",
+    // lineitem
+    "l_linenumber", "l_quantity", "l_discount", "l_tax", "l_returnflag", "l_linestatus",
+    "l_shipdate", "l_commitdate", "l_receiptdate", "l_shipinstruct", "l_shipmode",
+    // nation
+    "n_regionkey",
+    // orders
+    "o_orderstatus", "o_orderdate", "o_orderpriority", "o_shippriority",
+    // part
+    "p_mfgr", "p_brand", "p_type", "p_size", "p_container",
+    // partsupp
+    "ps_availqty",
+    // supplier
+    "s_nationkey",
+];
+
 /// Generates an output parquet file from the sources
 async fn write_parquet<I>(
     plan: OutputPlan,
@@ -178,6 +201,7 @@ where
             sources,
             num_threads,
             compression: plan.parquet_compression(),
+            dictionary_columns: DICTIONARY_COLUMNS,
             column_encodings,
             field_ids: plan.parquet_field_ids(),
             progress: progress.clone(),
@@ -210,7 +234,7 @@ macro_rules! define_run {
             plan: OutputPlan,
             num_threads: usize,
             progress: ProgressHandle,
-        ) -> io::Result<usize> {
+        ) -> io::Result<()> {
             use crate::tpch_cli::GenerationPlan;
             let scale_factor = plan.scale_factor();
             info!(
@@ -276,7 +300,7 @@ macro_rules! define_run {
                     write_parquet(plan, num_threads, gens, progress).await?
                 }
             };
-            Ok(num_threads)
+            Ok(())
         }
     };
 }
@@ -366,6 +390,30 @@ mod tests {
             ProgressHandle::new(move |units, _bytes| {
                 self.increments.fetch_add(units, Ordering::Relaxed);
             })
+        }
+    }
+
+    /// A misspelled name would silently leave its column without a dictionary
+    #[test]
+    fn dictionary_columns_exist() {
+        let tables = [
+            Table::Nation,
+            Table::Region,
+            Table::Part,
+            Table::Supplier,
+            Table::Partsupp,
+            Table::Customer,
+            Table::Orders,
+            Table::Lineitem,
+        ];
+        for column in DICTIONARY_COLUMNS {
+            assert!(
+                tables.iter().any(|table| table_schema(*table)
+                    .fields()
+                    .iter()
+                    .any(|f| f.name() == column)),
+                "no table has column {column}"
+            );
         }
     }
 

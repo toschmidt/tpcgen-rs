@@ -6,6 +6,7 @@
 use crate::output_location::WriteOutput;
 use crate::progress::ProgressHandle;
 use crate::sink::WriterSink;
+use crate::worker_queue::Permits;
 use futures_util::StreamExt;
 use log::debug;
 use std::collections::VecDeque;
@@ -83,16 +84,23 @@ where
     let mut stream = futures_util::stream::iter(sources_and_recyclers)
         // each generator writes to a buffer
         .map(async |(source, recycler)| {
+            let permits = Permits::current();
+            let chunk = Permits::chunk(&permits).await;
             let buffer = recycler.new_buffer(1024 * 1024 * 8);
-            // do the work in a task (on a different thread)
+            // do the work in a task (on a different thread, once one is free)
             let mut join_set = JoinSet::new();
-            join_set.spawn(async move { source.create(buffer) });
-            // wait for the task to be done and return the result
-            join_set
+            join_set.spawn(async move {
+                let _thread = Permits::thread(&permits).await;
+                source.create(buffer)
+            });
+            // wait for the task to be done and return the result; the writer
+            // releases the chunk permit once it wrote the buffer
+            let buffer = join_set
                 .join_next()
                 .await
                 .expect("had one item")
-                .expect("join_next join is infallible unless task panics")
+                .expect("join_next join is infallible unless task panics");
+            (buffer, chunk)
         })
         // run in parallel
         .buffered(num_threads)
@@ -114,7 +122,7 @@ where
         sink.sink(&header)?;
         // Report the header (even if empty) before any data; this starts the throughput timer.
         progress.increment(0, header.len() as u64);
-        while let Some(buffer) = rx.blocking_recv() {
+        while let Some((buffer, _chunk)) = rx.blocking_recv() {
             sink.sink(&buffer)?;
             progress.increment(1, buffer.len() as u64);
             captured_recycler.return_buffer(buffer);
