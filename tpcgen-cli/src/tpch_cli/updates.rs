@@ -6,14 +6,28 @@ use crate::args::{
 use crate::generate::{Source, TextOutput};
 use crate::logging::configure_logging;
 use crate::output_location::OutputLocation;
+use crate::parquet::ParquetOutput;
 use crate::progress::no_op_progress_tracker;
-use crate::tpch_cli::plan::tbl_chunk_count;
+use crate::tpch_cli::plan::{parquet_chunk_count, tbl_chunk_count};
+use crate::tpch_cli::runner::DICTIONARY_COLUMNS;
 use crate::tpch_cli::tbl::{DeleteTblSource, LineItemTblSource, OrderTblSource};
-use crate::tpch_cli::Table;
+use crate::tpch_cli::{Compression, Table};
 use crate::worker_queue::WorkerQueue;
+use arrow::record_batch::RecordBatchReader;
 use std::io;
 use std::path::PathBuf;
 use tpchgen::generators::{DeleteGenerator, LineItemGenerator, OrderGenerator, UpdateSet};
+use tpchgen_arrow::{DeleteArrow, LineItemArrow, OrderArrow};
+
+/// Output format of the update sets
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum UpdatesFormat {
+    /// dbgen's files: `orders.tbl.u<n>`, `lineitem.tbl.u<n>` and `delete.<n>`
+    Tbl,
+    /// `orders.u<n>.parquet`, `lineitem.u<n>.parquet` and
+    /// `delete.u<n>.parquet` (one column, `orderkey`)
+    Parquet,
+}
 
 /// Options of `tpch updates`
 #[derive(clap::Args)]
@@ -31,6 +45,14 @@ pub(super) struct UpdatesArgs {
         value_parser = clap::value_parser!(i32).range(1..)
     )]
     sets: i32,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value_t = UpdatesFormat::Tbl)]
+    format: UpdatesFormat,
+
+    /// Parquet block compression format (see `tpch parquet --help`)
+    #[arg(short = 'c', long, default_value = "SNAPPY")]
+    compression: Compression,
 
     /// Output directory for generated files
     #[arg(short, long, default_value = ".")]
@@ -80,9 +102,6 @@ impl UpdatesArgs {
                 );
             }
         }
-        let order_chunks = tbl_chunk_count(Table::Orders, row_count);
-        // there are on average 4 line items per order
-        let lineitem_chunks = tbl_chunk_count(Table::Lineitem, 4 * row_count);
         let location = OutputLocation::new(false, self.output_dir, self.overwrite);
         location.create_dir_all()?;
 
@@ -90,31 +109,82 @@ impl UpdatesArgs {
         // largest first: the line items of all sets, then the orders, then
         // the deletes
         let mut worker_queue = WorkerQueue::new(self.num_threads);
-        if row_count > 0 {
-            for set in 1..=self.sets {
-                let sources = (1..=lineitem_chunks).map(move |part| {
-                    LineItemTblSource::new(LineItemGenerator::update_set(
-                        sf,
-                        set,
-                        part,
+        match self.format {
+            UpdatesFormat::Tbl => {
+                let order_chunks = tbl_chunk_count(Table::Orders, row_count);
+                // there are on average 4 line items per order
+                let lineitem_chunks = tbl_chunk_count(Table::Lineitem, 4 * row_count);
+                if row_count > 0 {
+                    for set in 1..=self.sets {
+                        let sources = (1..=lineitem_chunks).map(move |part| {
+                            LineItemTblSource::new(LineItemGenerator::update_set(
+                                sf,
+                                set,
+                                part,
+                                lineitem_chunks,
+                            ))
+                        });
+                        let file = location.join(format!("lineitem.tbl.u{set}"));
+                        schedule(&mut worker_queue, file, lineitem_chunks, sources).await?;
+                    }
+                    for set in 1..=self.sets {
+                        let sources = (1..=order_chunks).map(move |part| {
+                            OrderTblSource::new(OrderGenerator::update_set(
+                                sf,
+                                set,
+                                part,
+                                order_chunks,
+                            ))
+                        });
+                        let file = location.join(format!("orders.tbl.u{set}"));
+                        schedule(&mut worker_queue, file, order_chunks, sources).await?;
+                    }
+                }
+                for set in 1..=self.sets {
+                    let sources =
+                        std::iter::once(DeleteTblSource::new(DeleteGenerator::new(sf, set)));
+                    let file = location.join(format!("delete.{set}"));
+                    schedule(&mut worker_queue, file, 1, sources).await?;
+                }
+            }
+            UpdatesFormat::Parquet => {
+                let compression = self.compression;
+                let order_chunks = parquet_chunk_count(Table::Orders, row_count);
+                let lineitem_chunks = parquet_chunk_count(Table::Lineitem, 4 * row_count);
+                // Like the delete files, write the (empty) files of empty sets
+                for set in 1..=self.sets {
+                    let sources = (1..=lineitem_chunks).map(move |part| {
+                        LineItemArrow::new(LineItemGenerator::update_set(
+                            sf,
+                            set,
+                            part,
+                            lineitem_chunks,
+                        ))
+                    });
+                    let file = location.join(format!("lineitem.u{set}.parquet"));
+                    schedule_parquet(
+                        &mut worker_queue,
+                        file,
                         lineitem_chunks,
-                    ))
-                });
-                let file = location.join(format!("lineitem.tbl.u{set}"));
-                schedule(&mut worker_queue, file, lineitem_chunks, sources).await?;
+                        compression,
+                        sources,
+                    )
+                    .await?;
+                }
+                for set in 1..=self.sets {
+                    let sources = (1..=order_chunks).map(move |part| {
+                        OrderArrow::new(OrderGenerator::update_set(sf, set, part, order_chunks))
+                    });
+                    let file = location.join(format!("orders.u{set}.parquet"));
+                    schedule_parquet(&mut worker_queue, file, order_chunks, compression, sources)
+                        .await?;
+                }
+                for set in 1..=self.sets {
+                    let sources = std::iter::once(DeleteArrow::new(DeleteGenerator::new(sf, set)));
+                    let file = location.join(format!("delete.u{set}.parquet"));
+                    schedule_parquet(&mut worker_queue, file, 1, compression, sources).await?;
+                }
             }
-            for set in 1..=self.sets {
-                let sources = (1..=order_chunks).map(move |part| {
-                    OrderTblSource::new(OrderGenerator::update_set(sf, set, part, order_chunks))
-                });
-                let file = location.join(format!("orders.tbl.u{set}"));
-                schedule(&mut worker_queue, file, order_chunks, sources).await?;
-            }
-        }
-        for set in 1..=self.sets {
-            let sources = std::iter::once(DeleteTblSource::new(DeleteGenerator::new(sf, set)));
-            let file = location.join(format!("delete.{set}"));
-            schedule(&mut worker_queue, file, 1, sources).await?;
         }
         worker_queue.join_all().await
     }
@@ -136,6 +206,39 @@ where
                 .write(TextOutput {
                     sources,
                     num_threads,
+                    progress: no_op_progress_tracker().register("", chunk_count as u64),
+                })
+                .await?;
+            if written {
+                log::info!("Generated {location}");
+            }
+            Ok(())
+        })
+        .await
+}
+
+/// Schedule writing `chunk_count` `sources`, one row group each, in Parquet
+/// format to `location`
+async fn schedule_parquet<I>(
+    worker_queue: &mut WorkerQueue,
+    location: OutputLocation,
+    chunk_count: i32,
+    compression: Compression,
+    sources: I,
+) -> io::Result<()>
+where
+    I: Iterator<Item: RecordBatchReader + Send> + Send + 'static,
+{
+    worker_queue
+        .schedule(chunk_count as usize, move |num_threads| async move {
+            let written = location
+                .write(ParquetOutput {
+                    sources,
+                    num_threads,
+                    compression,
+                    dictionary_columns: DICTIONARY_COLUMNS,
+                    column_encodings: None,
+                    field_ids: false,
                     progress: no_op_progress_tracker().register("", chunk_count as u64),
                 })
                 .await?;

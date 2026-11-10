@@ -1383,6 +1383,80 @@ fn test_tpcgen_cli_tpch_updates_match_dbgen() {
     }
 }
 
+/// Test that `tpch updates --format parquet` writes the rows of the TBL
+/// update sets (checked against dbgen above): the same rows in the same order
+#[test]
+fn test_tpcgen_cli_tpch_updates_parquet_match_tbl() {
+    let tbl_dir = tempdir().expect("Failed to create temporary directory");
+    let parquet_dir = tempdir().expect("Failed to create temporary directory");
+    for (format, dir) in [("tbl", &tbl_dir), ("parquet", &parquet_dir)] {
+        cargo_bin_cmd!("tpcgen-cli")
+            .args(["tpch", "updates", "--scale-factor", "0.1", "--sets", "2"])
+            .args(["--format", format, "--output-dir"])
+            .arg(dir.path())
+            .assert()
+            .success();
+    }
+
+    let mut files: Vec<_> = fs::read_dir(parquet_dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    files.sort();
+    assert_eq!(
+        files,
+        [
+            "delete.u1.parquet",
+            "delete.u2.parquet",
+            "lineitem.u1.parquet",
+            "lineitem.u2.parquet",
+            "orders.u1.parquet",
+            "orders.u2.parquet",
+        ]
+    );
+
+    for set in 1..=2 {
+        for (parquet, tbl) in [
+            (format!("delete.u{set}.parquet"), format!("delete.{set}")),
+            (
+                format!("lineitem.u{set}.parquet"),
+                format!("lineitem.tbl.u{set}"),
+            ),
+            (
+                format!("orders.u{set}.parquet"),
+                format!("orders.tbl.u{set}"),
+            ),
+        ] {
+            // the first column of every row: the order key
+            let expected: Vec<i64> = fs::read_to_string(tbl_dir.path().join(&tbl))
+                .unwrap()
+                .lines()
+                .map(|line| line.split('|').next().unwrap().parse().unwrap())
+                .collect();
+            let file = File::open(parquet_dir.path().join(&parquet)).unwrap();
+            let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+                .unwrap()
+                .build()
+                .unwrap();
+            let keys: Vec<i64> = reader
+                .flat_map(|batch| {
+                    let batch = batch.unwrap();
+                    let column = batch
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<arrow::array::Int64Array>()
+                        .unwrap()
+                        .values()
+                        .to_vec();
+                    column
+                })
+                .collect();
+            assert!(!expected.is_empty(), "{tbl} is empty");
+            assert_eq!(keys, expected, "{parquet} does not have the rows of {tbl}");
+        }
+    }
+}
+
 /// Test that `tpch updates` writes only the empty delete files below scale
 /// factor 0.01, like `dbgen -U`
 #[test]

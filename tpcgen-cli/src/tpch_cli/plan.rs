@@ -235,6 +235,22 @@ pub(crate) fn tbl_chunk_count(table: Table, row_count: i64) -> i32 {
     .part_count()
 }
 
+/// Return the number of row groups of the default size in which `row_count`
+/// rows of `table` are generated in Parquet format, such as the rows of an
+/// update set
+pub(crate) fn parquet_chunk_count(table: Table, row_count: i64) -> i32 {
+    OutputSize {
+        row_count,
+        ..OutputSize::new(
+            table,
+            1.0,
+            OutputFormat::Parquet,
+            DEFAULT_PARQUET_ROW_GROUP_BYTES,
+        )
+    }
+    .part_count()
+}
+
 /// output size of a table
 #[derive(Debug)]
 struct OutputSize {

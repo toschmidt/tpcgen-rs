@@ -66,6 +66,7 @@ compile_error!("one of the `arrow_60` (default) or `arrow_59` features must be e
 
 pub mod conversions;
 mod customer;
+mod delete;
 mod lineitem;
 mod nation;
 mod order;
@@ -75,6 +76,7 @@ mod region;
 mod supplier;
 
 pub use customer::CustomerArrow;
+pub use delete::DeleteArrow;
 pub use lineitem::LineItemArrow;
 pub use nation::NationArrow;
 pub use order::OrderArrow;

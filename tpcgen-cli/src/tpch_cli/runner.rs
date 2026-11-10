@@ -160,7 +160,7 @@ where
 /// Columns where almost every value is distinct (keys, prices, comments) are
 /// smaller and faster to write without one.
 #[rustfmt::skip]
-const DICTIONARY_COLUMNS: &[&str] = &[
+pub(super) const DICTIONARY_COLUMNS: &[&str] = &[
     // customer
     "c_nationkey", "c_mktsegment",
     // lineitem
