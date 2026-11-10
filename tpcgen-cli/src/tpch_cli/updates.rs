@@ -142,7 +142,7 @@ where
             if written {
                 log::info!("Generated {location}");
             }
-            Ok(num_threads)
+            Ok(())
         })
         .await
 }

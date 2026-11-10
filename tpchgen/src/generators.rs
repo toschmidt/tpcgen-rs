@@ -2744,6 +2744,18 @@ impl fmt::Display for Delete {
     }
 }
 
+impl Delete {
+    /// Appends the row in TBL format (with its trailing `|` and newline) to `buf`.
+    ///
+    /// The row text is the same as the [`Display`] output, but
+    /// this is much faster than `writeln!(buf, "{row}")`.
+    pub fn write_tbl(&self, buf: &mut Vec<u8>) {
+        push_i64(buf, self.orderkey);
+        buf.push(b'|');
+        buf.push(b'\n');
+    }
+}
+
 /// Generator for the orders deleted by update set `update_set` (dbgen's
 /// `delete.<update_set>`). See [`UpdateSet`].
 #[derive(Debug, Clone)]
