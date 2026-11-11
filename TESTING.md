@@ -115,6 +115,17 @@ Note: only tables with at least 1,000,000 source rows are split, so scale factor
 10 is the smallest that exercises a part boundary.
 See https://github.com/datafusion-contrib/tpcgen-rs/issues/457.
 
+### TPC-DS refresh data sets
+
+The refresh data sets of the data maintenance (`tpcgen-cli tpcds updates`,
+`dsdgen -update <n>`) are compared to the MD5 sums of `dsdgen` output for
+update sets 1 to 4 at scale factors 1, 10, 100 and 1000, in
+`tpcgen-cli/tests/fixtures/tpcds/updates-scale-N-c/`:
+
+```sh
+./tpcgen-cli/scripts/tpcds/compare-updates.sh --scale 1
+```
+
 ## Conformance in CI
 
 All the conformance tests described above run on every CI run.

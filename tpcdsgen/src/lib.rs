@@ -124,6 +124,7 @@ pub mod distribution;
 pub mod error;
 pub mod generator;
 pub mod join_key_utils;
+pub mod maintenance;
 pub mod nulls;
 pub mod output;
 pub mod permutations;

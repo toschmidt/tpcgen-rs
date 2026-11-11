@@ -62,6 +62,9 @@ tpcgen-cli tpch updates -s 10 --sets 2 --output-dir /tmp/tpch
 # TPC-DS Scale Factor 1, all tables, in CSV format in the `/tmp/tpcds` directory
 # Note: `tpcgen-cli tpcds` with no format writes `dat` (pipe-delimited) files
 tpcgen-cli tpcds csv -s 1 --output-dir /tmp/tpcds
+
+# TPC-DS refresh data sets 1 to 4 for Scale Factor 100 (like `dsdgen -scale 100 -update <n>`)
+tpcgen-cli tpcds updates -s 100 --sets 4 --output-dir /tmp/tpcds-updates
 ```
 
 ## Performance

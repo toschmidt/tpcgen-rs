@@ -32,6 +32,7 @@ pub mod parquet;
 mod plan;
 mod progress;
 mod runner;
+mod updates;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -107,6 +108,20 @@ Examples:
   # Generate all tables in Apache Parquet format with ZSTD compression and 128 MB row groups:
   tpcgen-cli tpcds parquet --compression='ZSTD(1)' --row-group-bytes=128MB --output-dir=/tmp/tpcds"#)]
     Parquet(ParquetArgs),
+    /// Generate the refresh data sets (dsdgen -update)
+    #[command(
+        long_about = r#"Generate the refresh data sets of the data maintenance (dsdgen -update)
+
+Writes the files of update sets 1 to N byte-for-byte as dsdgen v4.0.0 does:
+s_purchase_<n>.dat, s_purchase_lineitem_<n>.dat, s_store_returns_<n>.dat, the
+same for s_catalog_order and s_web_order, s_inventory_<n>.dat, delete_<n>.dat
+and inventory_delete_<n>.dat.
+
+Examples:
+  # Generate update sets 1 to 4 for scale factor 100:
+  tpcgen-cli tpcds updates -s 100 --sets 4 --output-dir=/tmp/tpcds-updates"#
+    )]
+    Updates(updates::UpdatesArgs),
 }
 
 #[derive(Args)]
@@ -272,6 +287,7 @@ impl Cli {
             Some(Commands::Dat(args)) => args.run().await,
             Some(Commands::Csv(args)) => args.run().await,
             Some(Commands::Parquet(args)) => args.run().await,
+            Some(Commands::Updates(args)) => args.run(),
             None => self.args.run().await,
         }
     }

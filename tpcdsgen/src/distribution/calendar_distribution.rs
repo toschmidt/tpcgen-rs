@@ -1,5 +1,5 @@
 use crate::distribution::file_loader::DistributionFileLoader;
-use crate::distribution::utils::{pick_random_value, WeightsBuilder};
+use crate::distribution::utils::{pick_random_index, pick_random_value, WeightsBuilder};
 use crate::error::Result;
 use crate::random::RandomNumberStream;
 use crate::TpcdsError;
@@ -23,6 +23,8 @@ pub enum CalendarWeights {
 /// Calendar distribution for date_dim generation (CalendarDistribution)
 pub struct CalendarDistribution {
     days_of_year: Vec<i32>,
+    days_of_month: Vec<i32>,
+    months: Vec<i32>,
     quarters: Vec<i32>,
     holiday_flags: Vec<i32>,
     weights_lists: Vec<Vec<i32>>,
@@ -47,6 +49,8 @@ impl CalendarDistribution {
 
     fn build_calendar_distribution() -> Result<Self> {
         let mut days_of_year = Vec::new();
+        let mut days_of_month = Vec::new();
+        let mut months = Vec::new();
         let mut quarters = Vec::new();
         let mut holiday_flags = Vec::new();
         let mut weights_builders: Vec<WeightsBuilder> = (0..Self::NUM_WEIGHT_FIELDS)
@@ -84,6 +88,14 @@ impl CalendarDistribution {
                 ))
             })?);
 
+            days_of_month.push(values[2].parse().map_err(|e| {
+                TpcdsError::new(&format!("Failed to parse date '{}': {}", values[2], e))
+            })?);
+
+            months.push(values[4].parse().map_err(|e| {
+                TpcdsError::new(&format!("Failed to parse month_num '{}': {}", values[4], e))
+            })?);
+
             quarters.push(values[5].parse().map_err(|e| {
                 TpcdsError::new(&format!("Failed to parse quarter '{}': {}", values[5], e))
             })?);
@@ -111,6 +123,8 @@ impl CalendarDistribution {
 
         Ok(CalendarDistribution {
             days_of_year,
+            days_of_month,
+            months,
             quarters,
             holiday_flags,
             weights_lists,
@@ -155,6 +169,18 @@ impl CalendarDistribution {
     /// Get the 0-based index into the calendar distribution for a given date.
     ///
     /// Based on CalendarDistribution.getIndexForDate in Java.
+    /// Picks a day of the (leap) year by `weights` and returns its month and
+    /// day of the month (dsdgen's `getSkewedJulianDate`, before it picks the
+    /// year).
+    pub fn pick_random_month_and_day(
+        weights: CalendarWeights,
+        stream: &mut RandomNumberStream,
+    ) -> (i32, i32) {
+        let dist = Self::get_instance();
+        let index = pick_random_index(&dist.weights_lists[weights as usize], stream);
+        (dist.months[index], dist.days_of_month[index])
+    }
+
     pub fn get_index_for_date(date: &crate::types::Date) -> i32 {
         let leap_year_index = if crate::types::Date::is_leap_year(date.year()) {
             1

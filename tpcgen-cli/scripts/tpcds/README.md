@@ -99,6 +99,7 @@ table below is just a roadmap.
 | `generate-fixtures.sh`    | Populate `tests/fixtures/tpcds/scale-N-{trino,c}/` with reference data.       |
 | `compare-table.sh`        | Compare one table's Rust output against the selected reference.               |
 | `compare-all-tables.sh`   | Run the full conformance suite for one compat mode (the main CI entry point). |
+| `compare-updates.sh`      | Compare the refresh data sets (`tpcds updates`) against C `dsdgen`'s MD5 sums. |
 | `clean-fixtures.sh`       | Remove all generated fixtures under `tests/fixtures/tpcds/`.                  |
 
 Run any script with `--help` to print its usage block.

@@ -768,6 +768,58 @@ fn test_tpcgen_cli_tpcds_dat_compat_mode() {
     );
 }
 
+/// Test that `tpcds updates` writes dsdgen's refresh data set: the delete
+/// date ranges and row counts of `dsdgen -scale 1 -update 1` (the files'
+/// contents are compared to dsdgen's by scripts/tpcds/compare-updates.sh).
+#[test]
+fn test_tpcgen_cli_tpcds_updates_match_dsdgen() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+
+    cargo_bin_cmd!("tpcgen-cli")
+        .arg("tpcds")
+        .arg("updates")
+        .arg("--scale-factor")
+        .arg("1")
+        .arg("--output-dir")
+        .arg(temp_dir.path())
+        .assert()
+        .success();
+
+    let read = |name: &str| {
+        fs::read_to_string(temp_dir.path().join(name))
+            .unwrap_or_else(|e| panic!("Failed to read {name}: {e}"))
+    };
+    assert_eq!(
+        read("delete_1.dat"),
+        "2000-05-20|2000-05-21|\n1999-09-18|1999-09-19|\n2002-11-12|2002-11-13|\n"
+    );
+    assert_eq!(
+        read("inventory_delete_1.dat"),
+        "2000-05-18|2000-05-25|\n1999-09-16|1999-09-23|\n2002-11-14|2002-11-21|\n"
+    );
+    for (name, rows) in [
+        ("s_purchase_1.dat", 1022),
+        ("s_purchase_lineitem_1.dat", 12264),
+        ("s_store_returns_1.dat", 1200),
+        ("s_catalog_order_1.dat", 682),
+        ("s_catalog_order_lineitem_1.dat", 6138),
+        ("s_catalog_returns_1.dat", 595),
+        ("s_web_order_1.dat", 256),
+        ("s_web_order_lineitem_1.dat", 3072),
+        ("s_web_returns_1.dat", 320),
+        ("s_inventory_1.dat", 270000),
+    ] {
+        assert_eq!(read(name).lines().count(), rows, "rows of {name}");
+    }
+    assert_eq!(
+        read("s_purchase_1.dat").lines().next(),
+        Some(
+            "1|AAAAAAAAEAAAAAAA|AAAAAAAAELMNAAAA|2000-05-20|0|10|244|So sound alternatives \
+             begin perhaps compatible elements. Markets follow. Instruments ought to walk|"
+        )
+    );
+}
+
 /// Test that TPC-DS DAT generation forwards the actual command line to dbgen_version.
 #[test]
 fn test_tpcgen_tpcds_dat_dbgen_version_command_line() {
